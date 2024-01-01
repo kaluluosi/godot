@@ -941,7 +941,7 @@ void EditorNode::_fs_changed() {
 		}
 
 		// Override export files by --export-files
-		if (!export_defer.export_files.is_empty()) {
+		if (!export_defer.export_files.is_empty() && export_preset.is_valid()) {
 			String export_files = export_defer.export_files;
 
 			Vector<String> files_to_export = export_preset->get_files_to_export();
@@ -4689,7 +4689,7 @@ void EditorNode::_begin_first_scan() {
 	requested_first_scan = true;
 }
 
-Error EditorNode::export_preset(const String &p_preset, const String &p_path, bool p_debug, bool p_pack_only, String &p_export_files) {
+Error EditorNode::export_preset(const String &p_preset, const String &p_path, bool p_debug, bool p_pack_only, const String &p_export_files) {
 	export_defer.preset = p_preset;
 	export_defer.path = p_path;
 	export_defer.debug = p_debug;
