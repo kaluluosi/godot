@@ -75,7 +75,7 @@ void EditorExport::_save() {
 			case EditorExportPreset::EXPORT_SELECTED_RESOURCES_INDEPENDENTLY: {
 				config->set_value(section, "export_filter", "resources_independency");
 				save_files = true;
-			};
+			} break;
 		}
 
 		if (save_files) {
