@@ -509,6 +509,7 @@ void Main::print_help(const char *p_binary) {
 	OS::get_singleton()->print("                                    <path> should be absolute or relative to the project directory, and include the filename for the binary (e.g. 'builds/game.exe').\n");
 	OS::get_singleton()->print("                                    The target directory must exist.\n");
 	OS::get_singleton()->print("  --export-debug <preset> <path>    Export the project in debug mode using the given preset and output path. See --export-release description for other considerations.\n");
+	OS::get_singleton()->print("  --export-files <file1,file2,...>  Specific files to export. It overrides the 'Resources to export' option of preset.\n");
 	OS::get_singleton()->print("  --export-pack <preset> <path>     Export the project data only using the given preset and output path. The <path> extension determines whether it will be in PCK or ZIP format.\n");
 #ifndef DISABLE_DEPRECATED
 	OS::get_singleton()->print("  --convert-3to4 [<max_file_kb>] [<max_line_size>]\n");
