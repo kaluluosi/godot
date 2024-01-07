@@ -4867,6 +4867,15 @@ void TileMap::_update_notify_local_transform() {
 	set_notify_local_transform(notify);
 }
 
+// void TileMap::set_process_mode(ProcessMode p_mode) {
+// 	this->Node2D::set_process_mode(p_mode);
+// 	bool enabled = p_mode == ProcessMode::PROCESS_MODE_DISABLED;
+
+// 	for (const TileMapLayer &E : layers) {
+// 		E->set_enabled(enabled);
+// 	}
+// }
+
 TileMap::TileMap() {
 	set_notify_transform(true);
 	_update_notify_local_transform();
