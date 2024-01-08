@@ -3094,6 +3094,12 @@ void TileMap::_notification(int p_what) {
 				_update_notify_local_transform();
 			}
 		} break;
+		case NOTIFICATION_DISABLED: {
+			update_internals();
+		} break;
+		case NOTIFICATION_ENABLED: {
+			update_internals();
+		} break;
 	}
 }
 
@@ -4867,10 +4873,6 @@ void TileMap::_update_notify_local_transform() {
 	set_notify_local_transform(notify);
 }
 
-void TileMap::_on_process_mode_changed(ProcessMode p_mode) {
-	update_internals();
-}
-
 TileMap::TileMap() {
 	set_notify_transform(true);
 	_update_notify_local_transform();
@@ -4882,8 +4884,6 @@ TileMap::TileMap() {
 	layers.push_back(new_layer);
 
 	default_layer.instantiate();
-
-	connect("_process_mode_changed", callable_mp(this, &TileMap::_on_process_mode_changed));
 }
 
 TileMap::~TileMap() {
