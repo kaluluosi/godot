@@ -2698,7 +2698,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 							continue;
 						}
 						String name = s.get_slice("/", 1);
-						ScriptLanguage::CodeCompletionOption option(name, ScriptLanguage::CODE_COMPLETION_KIND_FUNCTION;
+						ScriptLanguage::CodeCompletionOption option(name, ScriptLanguage::CODE_COMPLETION_KIND_FUNCTION);
 						option.insert_text = option.display.quote(quote_style);
 						r_result.insert(option.display, option);
 					}
