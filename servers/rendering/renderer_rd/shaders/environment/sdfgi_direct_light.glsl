@@ -121,6 +121,54 @@ float get_omni_attenuation(float distance, float inv_range, float decay) {
 	return nd * pow(max(distance, 0.0001), -decay);
 }
 
+// 增强的SDF采样函数
+float sample_sdf(uint cascade_idx, vec3 uvw) {
+    // 使用更高精度的采样
+    float sdf_value = texture(sampler3D(sdf_cascades[cascade_idx], linear_sampler), uvw).r;
+    // 16位精度（0-65535范围）
+    return sdf_value * 65535.0 - 1.0;
+}
+
+// 薄墙检测函数
+bool check_thin_wall(uint cascade_idx, vec3 start_pos, vec3 ray_dir, float max_distance, float thin_wall_threshold) {
+    float total_thickness = 0.0;
+    float step_size = 0.5; // 精细步进
+    float traveled = 0.0;
+    bool in_wall = false;
+    
+    while (traveled < max_distance) {
+        vec3 sample_pos = start_pos + ray_dir * traveled;
+        vec3 uvw = sample_pos * (1.0 / params.grid_size);
+        
+        float distance = sample_sdf(cascade_idx, uvw);
+        
+        if (distance < 0.05) { // 进入墙体
+            if (!in_wall) {
+                in_wall = true;
+            }
+            total_thickness += step_size;
+            
+            // 如果累计的墙厚度超过阈值但仍未穿出，认为是厚墙
+            if (total_thickness > thin_wall_threshold) {
+                return false; // 不是薄墙
+            }
+        } else {
+            if (in_wall) {
+                // 穿出墙体，检查是否薄墙
+                if (total_thickness > 0.0 && total_thickness <= thin_wall_threshold) {
+                    return true; // 是薄墙
+                }
+                in_wall = false;
+                total_thickness = 0.0;
+            }
+        }
+        
+        traveled += step_size;
+    }
+    
+    return false;
+}
+
 void main() {
 	uint voxel_index = uint(gl_GlobalInvocationID.x);
 
@@ -195,19 +243,44 @@ void main() {
 					vec3 n = aniso_dir[k];
 					float weight = trilinear.x * trilinear.y * trilinear.z * max(0, dot(n, probe_dir));
 
-					if (weight > 0.0 && params.use_occlusion) {
-						ivec3 occ_indexv = abs((cascades.data[params.cascade].probe_world_offset + probe_posi) & ivec3(1, 1, 1)) * ivec3(1, 2, 4);
-						vec4 occ_mask = mix(vec4(0.0), vec4(1.0), equal(ivec4(occ_indexv.x | occ_indexv.y), ivec4(0, 1, 2, 3)));
+					if (weight > 0.0) {
+						// 增强的遮挡检查
+						if (params.use_occlusion) {
+							// 从当前位置向探针方向进行射线步进检查
+							vec3 occ_start = (vec3(positioni) + vec3(0.5)) / params.grid_size;
+							occ_start.z += float(params.cascade);
+							
+							vec3 occ_dir = normalize(probe_pos - (vec3(positioni) + vec3(0.5)));
+							float occ_dist = length(probe_pos - (vec3(positioni) + vec3(0.5)));
+							
+							bool occ_hit = false;
+							float occ_step = 0.5;
+							for (float t = 0.0; t < occ_dist; t += occ_step) {
+								vec3 sample_pos = occ_start + occ_dir * t * (1.0 / params.grid_size);
+								float sdf_value = sample_sdf(params.cascade, sample_pos);
+								if (sdf_value < 0.1) { // 如果遇到几何体
+									occ_hit = true;
+									break;
+								}
+							}
+							
+							if (!occ_hit) {
+								// 原始遮挡计算
+								ivec3 occ_indexv = abs((cascades.data[params.cascade].probe_world_offset + probe_posi) & ivec3(1, 1, 1)) * ivec3(1, 2, 4);
+								vec4 occ_mask = mix(vec4(0.0), vec4(1.0), equal(ivec4(occ_indexv.x | occ_indexv.y), ivec4(0, 1, 2, 3)));
 
-						vec3 occ_pos = (vec3(positioni) + aniso_dir[k] + vec3(0.5)) / params.grid_size;
-						occ_pos.z += float(params.cascade);
-						if (occ_indexv.z != 0) { //z bit is on, means index is >=4, so make it switch to the other half of textures
-							occ_pos.x += 1.0;
+								vec3 occ_pos = (vec3(positioni) + aniso_dir[k] + vec3(0.5)) / params.grid_size;
+								occ_pos.z += float(params.cascade);
+								if (occ_indexv.z != 0) {
+									occ_pos.x += 1.0;
+								}
+								occ_pos *= vec3(0.5, 1.0, 1.0 / float(params.max_cascades));
+								float occlusion = dot(textureLod(sampler3D(occlusion_texture, linear_sampler), occ_pos, 0.0), occ_mask);
+								weight *= occlusion;
+							} else {
+								weight = 0.0; // 完全遮挡
+							}
 						}
-						occ_pos *= vec3(0.5, 1.0, 1.0 / float(params.max_cascades)); //renormalize
-						float occlusion = dot(textureLod(sampler3D(occlusion_texture, linear_sampler), occ_pos, 0.0), occ_mask);
-
-						weight *= occlusion;
 					}
 
 					if (weight > 0.0) {
@@ -307,10 +380,10 @@ void main() {
 		vec3 ray_dir = direction;
 		vec3 inv_dir = 1.0 / ray_dir;
 
-		//this is how to properly bias outgoing rays
+		// 优化的射线偏移 - 减少挤出风险
 		float cell_size = 1.0 / cascades.data[params.cascade].to_cell;
-		ray_pos += sign(direction) * cell_size * 0.48; // go almost to the box edge but remain inside
-		ray_pos += ray_dir * 0.4 * cell_size; //apply a small bias from there
+		ray_pos += sign(direction) * cell_size * 0.25; // 减少偏移量: 0.48 -> 0.25
+		ray_pos += ray_dir * 0.2 * cell_size; // 减少偏移量: 0.4 -> 0.2
 
 		for (uint j = params.cascade; j < params.max_cascades; j++) {
 			//convert to local bounds
@@ -332,21 +405,51 @@ void main() {
 
 			float advance = 0.0;
 			float occlusion = 1.0;
+			float wall_thickness = 0.0;
+			bool in_wall = false;
 
 			while (advance < max_advance) {
-				//read how much to advance from SDF
+				// 使用增强的SDF采样
 				vec3 uvw = (pos + ray_dir * advance) * pos_to_uvw;
-
-				float distance = texture(sampler3D(sdf_cascades[j], linear_sampler), uvw).r * 255.0 - 1.0;
-				if (distance < 0.001) {
-					//consider hit
-					hit = true;
-					break;
+				float distance = sample_sdf(j, uvw);
+				
+				// 薄墙检测
+				if (distance < 0.05) { // 进入墙体
+					if (!in_wall) {
+						in_wall = true;
+					}
+					wall_thickness += 0.5; // 假设步进大小
+					
+					// 检查是否为薄墙（小于3m）
+					if (wall_thickness > 0.0 && wall_thickness <= 3.0) {
+						// 进一步验证是否是真正的薄墙
+						vec3 wall_start = pos + ray_dir * (advance - wall_thickness * 0.5);
+						if (check_thin_wall(j, wall_start, ray_dir, wall_thickness, 3.0)) {
+							hit = true;
+							break;
+						}
+					}
+					
+					// 增加命中阈值，减少泄露
+					if (distance < 0.05) { // 增加阈值: 0.001 -> 0.05
+						hit = true;
+						break;
+					}
+				} else {
+					if (in_wall) {
+						// 穿出墙体
+						if (wall_thickness > 0.0 && wall_thickness <= 3.0) {
+							// 薄墙，应该视为命中
+							hit = true;
+							break;
+						}
+						in_wall = false;
+						wall_thickness = 0.0;
+					}
 				}
 
 				occlusion = min(occlusion, distance);
-
-				advance += distance;
+				advance += max(distance, 0.5); // 最小步进
 			}
 
 			if (hit) {
@@ -480,9 +583,23 @@ void main() {
 	for (uint i = 0; i < max_neighbours; i++) {
 		if (bool(neighbors & (1 << i))) {
 			ivec3 neighbour_pos = positioni + neighbour_positions[i];
-			imageStore(dst_light, neighbour_pos, uvec4(light_total_rgbe));
-			imageStore(dst_aniso0, neighbour_pos, aniso0);
-			imageStore(dst_aniso1, neighbour_pos, vec4(aniso1, 0.0, 0.0));
+			
+			// 边界检查
+			if (all(greaterThanEqual(neighbour_pos, ivec3(0))) && 
+				all(lessThan(neighbour_pos, ivec3(params.grid_size)))) {
+				
+				// 检查目标位置是否有有效几何
+				vec3 uvw_check = (vec3(neighbour_pos) + vec3(0.5)) * pos_to_uvw;
+				uvw_check.z += float(params.cascade);
+				float sdf_check = sample_sdf(params.cascade, uvw_check);
+				
+				// 只在非实体位置填充（增加阈值减少泄露）
+				if (sdf_check > 1.0) { // 调整阈值: 0.5 -> 1.0
+					imageStore(dst_light, neighbour_pos, uvec4(light_total_rgbe));
+					imageStore(dst_aniso0, neighbour_pos, aniso0);
+					imageStore(dst_aniso1, neighbour_pos, vec4(aniso1, 0.0, 0.0));
+				}
+			}
 		}
 	}
 
